@@ -2533,6 +2533,11 @@ int ii_install_ex(unsigned long addr, ii_callback cb, void* user, int priority) 
         if (zidx >= 0) {
             if (g_reg->site[zidx].kind != 0) return -16;   // 已有的是 LIGHT 站点
             int rc = zhreg_add_cb(g_reg, zidx, (uint64_t)cb, (uint64_t)user, g_myId, II_PRIO_DEFAULT);
+            if (rc == -3) {
+                wd_log("install 共享 @0x%lx：站点回调槽已满（%d 个探针共用），"
+                       "调大 ZHREG_MAX_CB 后重编所有探针\n", addr, ZHREG_MAX_CB);
+                return -3;
+            }
             if (rc < 0) return rc;
             // 共享站点也要在本实例记账：否则 ii_engine_count() 显示 0，
             // 用户会以为安装失败（t11 在真机上就是这个现象）。
@@ -3384,6 +3389,57 @@ static void site_retire(ii_site* s) {
 
 static void site_release(ii_site* s) {
     if (!s) return;
+
+    // ═══════════════════════════════════════════════════════════════
+    //  第一步：判断这个站点是不是「还有别的探针在用」
+    //
+    //  站点记录归第一个安装者。如果我是建立者，而别的探针还挂在这
+    //  个站点的回调槽上，那么：
+    //    · 入口指令不能恢复（那等于把别人的 hook 一起拆掉）
+    //    · shell 槽位不能归还（入口还指着它，归还后会被别的站点复用）
+    //    · trampoline 不能释放（同上）
+    //  正确做法是只摘掉自己的回调槽，把建立者身份转交给还活着的一方。
+    //
+    //  ★ 顺序必须在这里，不能放到后面 —— 早期版本先 munmap/归还槽位
+    //    再判断，等于把别人的入口指向已回收内存，真机表现是
+    //    「卸载 A 之后 B 的 hook 让游戏闪退」。
+    // ═══════════════════════════════════════════════════════════════
+    if (g_reg && s->regIdx >= 0 && s->regIdx < g_reg->nSite) {
+        zh_site_rec* zs = &g_reg->site[s->regIdx];
+        int heir = 0;
+        for (int k = 0; k < ZHREG_MAX_CB; ++k) {
+            if (!__atomic_load_n(&zs->cb[k].alive, __ATOMIC_ACQUIRE)) continue;
+            if (zs->cb[k].owner == g_myId) continue;
+            heir = zs->cb[k].owner;
+            break;
+        }
+        if (heir > 0) {
+            // 交叉验证：确实还有别人的活回调（防止读到已死的槽位）
+            int others = zhreg_foreign_cb(g_reg, s->regIdx, g_myId);
+            if (others <= 0) heir = 0;
+        }
+        if (heir > 0) {
+            zhreg_del_cb(g_reg, s->regIdx, g_myId);   // 只摘自己那几槽
+            zs->owner = heir;                          // 入口交给他负责
+            wd_log("release @0x%lx：探针 %d 仍在用（本方占 %d 槽），"
+                   "保留入口与 shell，转交建立者\n",
+                   s->addr, heir, zhreg_owner_cb_count(g_reg, s->regIdx, g_myId));
+
+            // 只摘本地记账：shell/trampoline 现在归新的建立者管，
+            // 将来由它的 site_release 释放。
+            for (int i = 0; i < g_nSites; ++i)
+                if (site_at(i) == s) { site_set(i, NULL); break; }
+            chain_clear(s);
+            s->shell      = 0;        // 不再持有，避免重复归还（unsigned long）
+            s->trampoline = 0;        // 不再持有，避免重复 munmap
+            site_retire(s);
+            return;
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  第二步：确认没人用了，正常释放
+    // ═══════════════════════════════════════════════════════════════
     if (s->wideMode && s->trampoline) {
         // 重定向的 16 字节模式把 shell+trampoline 放在同一块 8KB 映射里
         // （shell @+0，trampoline @+4096），必须一次释放 8KB；
