@@ -1,0 +1,29 @@
+# ---- 构建产物 ----
+build/
+build-*/
+build_*/
+cmake-build-*/
+*.o
+*.a
+compile_commands.json
+.cache/
+
+# ---- Python ----
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ---- 编辑器 / IDE ----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ---- 临时文件 ----
+*.log
+*.bak
+*.tmp
