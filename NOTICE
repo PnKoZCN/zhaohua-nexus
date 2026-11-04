@@ -1,0 +1,72 @@
+# NOTICE
+
+## 本项目
+
+**ZhaoHua Nexus** — 面向 NetEase Minecraft Bedrock 的原生 ARM64 Hook 框架
+
+- 源代码：<https://github.com/PnKoZCN/zhaohua-nexus>
+- 许可证：[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)（见 `LICENSE`）
+- 附加条款：见 README 的「附加条款」一节（署名格式 / 严禁外挂 / 免责声明）
+
+---
+
+## 如果你分发本项目的衍生作品
+
+**必须在此文件中保留以下声明**，并在你的 README 首屏显著位置注明：
+
+```
+本项目基于 ZhaoHua Nexus 开发
+https://github.com/PnKoZCN/zhaohua-nexus
+```
+
+**不得移除、隐藏或改写上述名称与链接。**
+
+---
+
+## 第三方组件
+
+本项目**自行实现**了全部核心功能，未直接引用第三方 Hook 框架的代码。
+
+设计思路上参考了以下开源项目（仅参考理念，未复制代码）：
+
+| 项目 | 许可证 | 参考内容 |
+|---|---|---|
+| [SpongePowered/Mixin](https://github.com/SpongePowered/Mixin) | MIT | 注入点分类、优先级语义、`@Redirect` / `@ModifyConstant` 等概念命名 |
+| [FabricMC/fabric-example-mod](https://github.com/FabricMC/fabric-example-mod) | Apache-2.0 | 示例工程目录结构与构建流程编排 |
+| [ARM64 指令集手册](https://developer.arm.com/documentation) | — | 指令编码与重定位规则 |
+
+**上述项目的许可证与本项目无关**，本项目不包含它们的任何代码。
+
+---
+
+## 数据表说明
+
+`data/` 目录下的偏移数据表由本项目作者通过静态分析生成，
+**不包含任何游戏原始代码或资源**。
+
+数据表仅记录"某个函数在文件中的位置"这类元信息，属于互操作性所需的
+事实性数据。
+
+---
+
+## 商标声明
+
+"Minecraft" 是 Mojang Studios / Microsoft 的商标。
+"网易"、"NetEase" 是网易公司的商标。
+
+**本项目与上述公司无任何关联、合作或背书关系。**
+
+---
+
+## 用途声明
+
+**本项目严禁用于游戏外挂开发。**
+
+详见 README 的「附加条款 2」。允许的用途仅限：纯单机/离线环境、
+获得许可的私人测试服、单人自身账号、安全研究。
+
+**任何在联网多人环境中获取不公平优势的使用，均违反本协议。**
+
+---
+
+Copyright (c) 2026 ZhaoHua Nexus Contributors
