@@ -25,6 +25,34 @@
 
 ---
 
+## 📘 API 手册（28 篇，完整）
+
+**在线阅读**：<https://github.com/PnKoZCN/zhaohua-nexus/tree/main/docs/api>
+
+| 分组 | 文档 |
+|---|---|
+| 入门 | [为什么需要 Nexus](docs/api/01-Introduction-Why-Nexus) · [vs Fabric Mixin](docs/api/02-Introduction-vs-Fabric-Mixin) · [第一个 Hook](docs/api/03-Getting-Started-First-Hook) · [构建与注入](docs/api/04-Getting-Started-Build-Inject) |
+| 核心概念 | [站点与回调链](docs/api/10-Core-Site-And-Chain) · [指令改写原理](docs/api/11-Core-Instruction-Rewrite) · [内存池与外壳](docs/api/12-Core-Memory-Pool) |
+| API 参考 | [生命周期](docs/api/20-API-Lifecycle) · [函数查找](docs/api/21-API-Find-Function) · [Hook 安装](docs/api/22-API-Hook-Install) · [多回调链](docs/api/23-API-Multi-Callback) · [字段访问](docs/api/24-API-Field-Access) · [常量修改](docs/api/25-API-Constant-Modify) · [调用重定向](docs/api/26-API-Call-Redirect) · [栈局部变量](docs/api/27-API-Stack-Local) · [返回值](docs/api/28-API-Return-Value) · [多实例](docs/api/29-API-Multi-Instance) · [崩溃隔离](docs/api/30-API-Crash-Isolation) · [数据表](docs/api/31-API-Data-Table) · [日志](docs/api/32-API-Logging) |
+| 参考 | [错误码](docs/api/40-Reference-Error-Codes) · [性能](docs/api/41-Reference-Performance) · [数据格式](docs/api/42-Reference-Data-Format) |
+| 指南 | [偏移采集](docs/api/50-Guide-Offset-Collection) · [版本更新](docs/api/51-Guide-Version-Update) · [常见陷阱](docs/api/52-Guide-Pitfalls) |
+| 其它 | [FAQ](docs/api/90-FAQ) |
+
+---
+
+## 🧩 示例 Mod
+
+**[zhaohua-example-mod](https://github.com/PnKoZCN/zhaohua-example-mod)** —— 对标 [fabric-example-mod](https://github.com/FabricMC/fabric-example-mod) 的最小可运行工程。
+
+```bash
+git clone https://github.com/PnKoZCN/zhaohua-example-mod.git
+cd zhaohua-example-mod && export ANDROID_NDK=/opt/android-ndk-r27c && ./build.sh
+```
+
+四个示例功能（tick 计数 / 血量下限 / 调用统计 / 多实例），带完整构建注入脚本。
+
+---
+
 ## 快速开始
 
 ```c
