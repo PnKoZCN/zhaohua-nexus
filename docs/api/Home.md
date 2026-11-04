@@ -87,9 +87,13 @@ static void run(void) {
 }
 ```
 
-### 3. 一次只注入一个库
+### 3. 开发调试期：一次只注入一个库
 
-注入 → 验证 → 立即删除 → 再注入下一个。
+**这不是框架限制。** 框架支持多库共存（单站点最多 32 个库、共享 8192 个站点，见 [多库共存](29-API-Multi-Instance)）。
+
+这是**调试纪律** —— 出问题时能确定是谁引起的。
+
+注入 → 验证 → 卸载 → 再注入下一个。验证通过后可同时加载多个库。
 
 ---
 
@@ -133,4 +137,21 @@ static void run(void) {
 
 ## 📄 许可
 
-MIT License。仅供学习研究与单机 Mod 开发，**禁止用于联机作弊**。
+**[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)** +
+附加条款，不是 MIT。
+
+| 允许 | 禁止 |
+|---|---|
+| ✅ 使用、修改、分发 | ❌ **商业使用**（NonCommercial） |
+| ✅ 个人学习 / 安全研究 / 单机娱乐 | ❌ **闭源分发**（ShareAlike） |
+| ✅ 开源项目中引用 | ❌ **移除署名**（Attribution） |
+| | ❌ **开发游戏外挂**（附加条款 2） |
+
+**署名格式**：
+
+```
+本项目基于 ZhaoHua Nexus 开发
+https://github.com/PnKoZCN/zhaohua-nexus
+```
+
+完整条款见仓库 `LICENSE` 与 `README` 的「附加条款」一节。
