@@ -197,7 +197,7 @@ typedef struct {
 // 这个阈值只用于告警，不阻止执行。
 #define II_CB_SLOW_MS      50
 
-#define II_ENGINE_MAX_OWN  128
+#define II_ENGINE_MAX_OWN  1024   // 与共享区 ZHREG_MAX_SITE(8192) 拉开一个量级：单个库不该独占共享表
 
 #define II_SITE_CHUNK   256
 #define II_SITE_CHUNKS  1024
