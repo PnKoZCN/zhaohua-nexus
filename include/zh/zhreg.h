@@ -20,15 +20,42 @@ extern "C" {
 #endif
 
 #define ZHREG_MAGIC        0x5A4852454702ULL   // "ZHREG"+v2：站点结构加了回调链，旧布局不兼容
+// 共享区布局版本：本文件的结构体/上限一变就必须 +1。
+// 老探针看到版本不符会整块重置（进程内共用一份布局，混跑必然读错偏移）。
+#define ZHREG_LAYOUT       2
 #define ZHREG_PATH         "/data/data/com.netease.x19/files/zhprobe/poolreg.bin"
-#define ZHREG_FILE_SIZE    (512*1024)
+// 共享区大小必须 >= sizeof(zh_region)，否则 mmap 后写越界（会踩到相邻映射）。
+// 当前布局：pool[64] 约 380 KB + site[8192] 约 8.5 MB，取 12 MB 留余量。
+// 改动任何上限后都要重新核对下面这条静态断言。
+#define ZHREG_FILE_SIZE    (12*1024*1024)
 #define ZHREG_MAX_POOL     64
-#define ZHREG_MAX_SITE     2048
-#define ZHREG_SITES_PER_POOL 128   // 384→128，腾出空间给回调链
+#define ZHREG_MAX_SITE     8192   // 跨探针共享：多个库都在装站点时是共用的
+#define ZHREG_SITES_PER_POOL 256   // 每个池记多少站点地址（池失效迁移用）
+// 单个站点同时挂几个探针的回调（跨探针上限）。
+// 第 n 个库在同一个函数上再挂一个回调就 +1。16 个库封顶。
+#define ZHREG_MAX_CB       32
+
 #define ZHREG_MAX_FREE 16      // 每个池记住多少个已释放槽位可复用（必须在 typedef 之前）
 #define ZHREG_QUARANTINE_MS 3000   // 归还的 shell 槽位隔离多久才允许复用
 #define ZHREG_MAX_PENDING   32     // 每个池最多记多少个"隔离中"的槽位
 #define ZHREG_WD_TIMEOUT_MS 10000
+
+// ---------------------------------------------------------------------------
+// 跨探针上限说明（数值在文件开头统一给出）
+// ---------------------------------------------------------------------------
+//
+// 这些上限决定「同时注入几个库」时的实际容量。改动它们会改变共享区
+// 布局（zh_region 大小），因此 ZHREG_LAYOUT 必须同步 +1：老版本探针
+// 看到布局版本不符会整块重置，而不是按错的偏移去读别人的数据。
+//
+//   ZHREG_MAX_CB         单个站点同时挂几个探针的回调（当前 32）
+//   ZHREG_MAX_SITE       全进程跨探针的站点总数（当前 8192）
+//   ZHREG_MAX_POOL       trampoline 池总数（当前 64）
+//   ZHREG_SITES_PER_POOL 每个池记录多少站点地址（当前 256）
+//
+// 每个探针另有自己的本地上限（II_MAX_SITES / II_ENGINE_MAX_OWN），
+// 是第二道闸：共享区够用不代表单库可以无限装。
+
 
 typedef struct {
     uint64_t      base;
@@ -74,7 +101,7 @@ typedef struct {
     uint32_t pad;
 } zh_cb_rec;            // 32 字节（布局未变：priority 占用了原来的 pad）
 
-#define ZHREG_MAX_CB  4
+// ZHREG_MAX_CB 定义见文件末尾（跨探针容量段），此处不再重复定义。
 
 // 站点记录
 //
@@ -158,6 +185,9 @@ int  zhreg_add_cb(zh_region* r, int siteIdx, uint64_t cb, uint64_t user,
 void zhreg_del_cb(zh_region* r, int siteIdx, int32_t owner);
 // 站点上属于「别人」的回调数（供 handler 快速判断要不要进慢路径）
 int  zhreg_foreign_cb(zh_region* r, int siteIdx, int32_t myId);
+
+// 同一探针在某个站点里占用的回调槽数
+int  zhreg_owner_cb_count(zh_region* r, int siteIdx, int32_t owner);
 
 #ifdef __cplusplus
 }
