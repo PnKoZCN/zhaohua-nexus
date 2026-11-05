@@ -780,8 +780,12 @@ static int next_n_clean(unsigned long addr, int n) {
     return 1;
 }
 
+// 定义在文件后半部分（需要 g_reg）
+static int already_jumped_to_pool(unsigned long addr);
+
 int ii_can_instrument(unsigned long addr) {
     if (ii_find(addr)) return 0;                // 已装（真正的"不能重复装"）
+    if (already_jumped_to_pool(addr)) return 0; // 已被别的实例插桩
     uint32_t w = *(volatile uint32_t*)addr;
     if (w == 0 || w == 0xFFFFFFFFu) return 0;   // 无效
     if (writes_ip0_ip1(w)) return 0;            // 会踩传递寄存器
@@ -845,6 +849,37 @@ ii_site* ii_find(unsigned long addr) {
 
 // 共享注册表（定义在文件后半部分）
 static zh_region* g_reg  = NULL;
+
+// 判断该地址是否已经被【别的引擎实例 / 别的探针】改成了跳转。
+//
+// 为什么必须查：
+//   两个引擎实例（比如一个静态打包在探针里、一个是共享库）先后装同一个地址时，
+//   后来的那个会把前一个写进去的 `b` 当成"原始指令"存进 trampoline。
+//   于是 trampoline 执行的还是那条 `b` —— 又跳回前一个的 shell，dispatch 递归，
+//   主线程死循环，整个游戏卡死（真机实测：计数飙到 1200 万次/秒，随后冻结）。
+//
+// 判定方式：指令是 b，且目标落在任一已注册池的范围内 → 那是 shell，不是原码。
+static int already_jumped_to_pool(unsigned long addr) {
+    uint32_t w = *(volatile uint32_t*)addr;
+
+    // 只处理无条件 b（opcode 000101）
+    if ((w & 0xFC000000u) != 0x14000000u) return 0;
+
+    // 解 26 位有符号偏移（单位 4 字节）
+    int32_t off = (int32_t)(w & 0x03FFFFFFu);
+    if (off & 0x02000000) off |= (int32_t)0xFC000000u;   // 符号扩展
+    uint64_t target = (uint64_t)addr + (int64_t)off * 4;
+
+    if (!g_reg) return 0;
+    for (int i = 0; i < g_reg->nPool; ++i) {
+        zh_pool_rec* p = &g_reg->pool[i];
+        if (p->state != 1 || !p->base) continue;
+        if (target >= p->base && target < p->base + p->size) return 1;
+    }
+    return 0;
+}
+
+
 static int        g_myId = 0;
 
 // 当前正在安装回调的实例 id（0 = 全局引擎）。
@@ -860,7 +895,8 @@ static void make_readable(unsigned long addr, size_t len);
 static void watchdog_start(void);
 
 // 回调链管理（定义在 dispatch 之前）
-static int  chain_insert(ii_site* s, ii_callback cb, void* user, int prio);
+static int  chain_insert_named(ii_site* s, ii_callback cb, void* user, int prio,
+                               const char* ownerName);
 static int  chain_remove(ii_site* s, ii_callback cb, void* user);
 static void chain_clear(ii_site* s);
 static void wd_log(const char* fmt, ...);
@@ -1593,11 +1629,13 @@ static void cbnode_free_chain(ii_cb_node* head) {
     while (head) { ii_cb_node* nx = head->next; free(head); head = nx; }
 }
 
-static int chain_insert(ii_site* s, ii_callback cb, void* user, int prio) {
+static int chain_insert_named(ii_site* s, ii_callback cb, void* user, int prio,
+                             const char* ownerName) {
     if (!s || !cb) return -1;
     ii_cb_node* n = cbnode_new(cb, user, prio);
     if (!n) return -9;
-    n->owner = g_curOwner;      // 打归属标记（见 g_curOwner 说明）
+    n->owner = g_curOwner;
+    n->ownerName = ownerName;      // 打归属标记（见 g_curOwner 说明）
     if (!s->cbs || s->cbs->priority < prio) {
         n->next = s->cbs; s->cbs = n;
     } else {
@@ -1634,6 +1672,11 @@ static int chain_remove(ii_site* s, ii_callback cb, void* user) {
     return -1;
 }
 
+// 兼容包装：不指定归属名
+static int chain_insert(ii_site* s, ii_callback cb, void* user, int prio) {
+    return chain_insert_named(s, cb, user, prio, NULL);
+}
+
 static void chain_clear(ii_site* s) {
     if (!s) return;
     cbnode_free_chain(s->cbs);
@@ -1646,6 +1689,18 @@ int ii_add_callback(unsigned long addr, ii_callback cb, void* user, int priority
     if (!s) { wd_log("ii_add_callback: 站点 0x%lx 不存在，先调 ii_install\n", addr); return -2; }
     if (s->lightCb) return -16;
     return chain_insert(s, cb, user, priority);
+}
+
+int ii_add_callback_owned(unsigned long addr, ii_callback cb, void* user,
+                           int priority, const char* ownerName) {
+    if (!addr || !cb) return -1;
+    ii_site* s = ii_find(addr);
+    if (!s) {
+        wd_log("ii_add_callback_owned: 站点 0x%lx 不存在，先调 ii_install\n", addr);
+        return -2;
+    }
+    if (s->lightCb) return -16;
+    return chain_insert_named(s, cb, user, priority, ownerName);
 }
 
 int ii_remove_callback(unsigned long addr, ii_callback cb, void* user) {
@@ -1672,26 +1727,80 @@ const char* ii_get_owner(unsigned long addr) {
     return s ? s->owner : NULL;
 }
 
+// 按 Mod 归属名卸载。
+//
+// ★ 必须在【回调节点】级别匹配，不能在站点级别匹配。
+//
+//   多个 Mod 动态链接同一个 libzh_engine.so 时共用一份引擎、一张站点表。
+//   站点上的 owner 字段是单个字符串，后装的 Mod 一调 zh_set_owner 就会把
+//   前一个覆盖掉。此时前一个 Mod 卸载时按名字找不到任何站点，静默返回 0，
+//   而它的回调还在每次调用里跑 —— 真机实测：A 调用 zh_unhook_owner("modA")
+//   返回 0，之后 A 的计数仍以 20 次/秒继续增长，直到进程退出。
+//
+//   改为节点级匹配后：各 Mod 只摘掉自己那几个节点；只有当站点上再也没有
+//   任何存活回调时，才真正卸载站点（恢复入口指令、归还 shell）。
+//   这样单个引擎内多 Mod 共存、以及跨探针共享站点两种部署都能正确工作。
 int ii_uninstall_owner(const char* owner) {
     if (!owner) return -1;
-    int n = 0;
+
+    int removedNodes = 0;
+    int removedSites = 0;
+
     // 倒序遍历：卸载会清空槽位，正序会跳过元素
     for (int i = g_nSites - 1; i >= 0; --i) {
         ii_site* s = site_at(i);
         if (!s) continue;
-        if (!s->owner || __builtin_strcmp(s->owner, owner) != 0) continue;
-        if (ii_uninstall(s->addr) == 0) ++n;
+
+        int hit = 0;
+        for (ii_cb_node* n = s->cbs; n; n = n->next) {
+            if (!n->alive || !n->cb) continue;
+
+            // 节点级归属优先；没有归属名的旧节点退回站点级 owner 匹配
+            const char* nm = n->ownerName ? n->ownerName : s->owner;
+            if (!nm || __builtin_strcmp(nm, owner) != 0) continue;
+
+            n->alive = 0;
+            if (s->nCbs > 0) s->nCbs--;
+            ++hit;
+            ++removedNodes;
+        }
+
+        if (!hit) continue;
+
+        // 该站点还有别人的回调 → 保留入口，不卸载
+        if (s->nCbs > 0) {
+            wd_log("uninstall_owner(\"%s\"): 0x%lx 摘掉 %d 个回调，剩 %d 个（保留站点）\n",
+                   owner, s->addr, hit, s->nCbs);
+            continue;
+        }
+        if (ii_uninstall(s->addr) == 0) ++removedSites;
     }
-    if (n) wd_log("uninstall_owner(\"%s\"): 卸载 %d 个站点\n", owner, n);
-    return n;
+
+    if (removedNodes || removedSites)
+        wd_log("uninstall_owner(\"%s\"): 摘掉 %d 个回调节点，卸载 %d 个站点\n",
+               owner, removedNodes, removedSites);
+    else
+        wd_log("uninstall_owner(\"%s\"): 没有匹配的归属，未做任何改动\n", owner);
+
+    return removedSites;
 }
 
 
 
 // 调度：由 handler 调用。c 指向栈上的 ii_ctx。
 // 返回要跳转的地址（trampoline 或 cancel 跳板）。
+// 诊断计数器：dispatch 被调用的次数 / 站点查找失败的次数。
+// 用来区分「shell 没跳进来」和「跳进来了但查不到站点」。
+static volatile unsigned long g_dispatchCalls = 0;
+static volatile unsigned long g_dispatchMiss  = 0;
+
+unsigned long ii_dispatch_count(void) { return __atomic_load_n(&g_dispatchCalls, __ATOMIC_RELAXED); }
+unsigned long ii_dispatch_miss(void)  { return __atomic_load_n(&g_dispatchMiss,  __ATOMIC_RELAXED); }
+
 void* ii_dispatch(ii_ctx* c, uint64_t slotId) {
+    __atomic_add_fetch(&g_dispatchCalls, 1, __ATOMIC_RELAXED);
     ii_site* s = site_at((int)slotId);
+    if (!s) __atomic_add_fetch(&g_dispatchMiss, 1, __ATOMIC_RELAXED);
     if (!s) {
         // ★ 绝不能返回 NULL：ii_common 尾部是 ldr x16,[sp,#0x100]; br x16，
         //   拿到 NULL 就直接跳到地址 0，整进程立刻闪退且没有 tombstone
@@ -2549,7 +2658,12 @@ int ii_install_ex(unsigned long addr, ii_callback cb, void* user, int priority) 
         }
     }
 
-    if (!ii_can_instrument(addr)) return -5;
+    if (!ii_can_instrument(addr)) {
+        if (already_jumped_to_pool(addr))
+            wd_log("拒绝安装 @0x%lx：入口已被别的引擎实例改写成跳转，"
+                   "再插会把那条 b 当成原指令，trampoline 会跳回 shell 造成递归\n", addr);
+        return -5;
+    }
 
     ii_site* s = calloc(1, sizeof(ii_site));
     if (!s) return -9;
@@ -2605,7 +2719,12 @@ int ii_install_light_ex(unsigned long addr, ii_light_callback cb, void* user, in
         }
     }
 
-    if (!ii_can_instrument(addr)) return -5;
+    if (!ii_can_instrument(addr)) {
+        if (already_jumped_to_pool(addr))
+            wd_log("拒绝安装 @0x%lx：入口已被别的引擎实例改写成跳转，"
+                   "再插会把那条 b 当成原指令，trampoline 会跳回 shell 造成递归\n", addr);
+        return -5;
+    }
 
     ii_site* s = calloc(1, sizeof(ii_site));
     if (!s) return -9;
@@ -2723,7 +2842,12 @@ int ii_install_raw(unsigned long addr, void* detour, void** origOut) {
     // 替换语义无法叠加：任何探针（含指令级站点）占了这个地址就拒绝
     if (g_reg && zhreg_find_site(g_reg, addr) >= 0) return -14;
 
-    if (!ii_can_instrument(addr)) return -5;
+    if (!ii_can_instrument(addr)) {
+        if (already_jumped_to_pool(addr))
+            wd_log("拒绝安装 @0x%lx：入口已被别的引擎实例改写成跳转，"
+                   "再插会把那条 b 当成原指令，trampoline 会跳回 shell 造成递归\n", addr);
+        return -5;
+    }
 
     ii_site* s = calloc(1, sizeof(ii_site));
     if (!s) return -9;
