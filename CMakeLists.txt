@@ -173,7 +173,10 @@ if(ZH_BUILD_STATIC)
                 ${CMAKE_CURRENT_SOURCE_DIR}/src/common
                 ${CMAKE_CURRENT_SOURCE_DIR}/data)
     target_compile_definitions(zh_engine_static PRIVATE _GNU_SOURCE)
-    set_target_properties(zh_engine_static PROPERTIES OUTPUT_NAME zh_engine)
+    # 需要 PIC 才能被链进 .so（诊断探针会 whole-archive 整个引擎）
+    set_target_properties(zh_engine_static PROPERTIES
+        OUTPUT_NAME zh_engine
+        POSITION_INDEPENDENT_CODE ON)
 endif()
 
 # ---- 测试 ----------------------------------------------------------------
