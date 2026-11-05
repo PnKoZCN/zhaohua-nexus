@@ -194,6 +194,12 @@ int  zh_make_cancelable(const char* funcName);
 // ---------------------------------------------------------------------------
 
 // 设置 hook 的归属（模块名），用于分组卸载
+// 给站点的回调打上 Mod 归属名（owner 必须是长生命周期字符串）。
+// 多个 Mod 共用同一个引擎时，用它区分各自装的回调，才能分别卸载。
+// zh_unhook_owner(名字) 只摘掉属于自己的回调；站点还有别人的回调时保留入口。
+int zh_hook_owned(const char* funcName, ii_callback cb, void* user,
+                  const char* owner);
+
 int zh_set_owner(const char* funcName, const char* owner);
 // 卸载某个归属的全部 hook，返回数量
 int zh_unhook_owner(const char* owner);
