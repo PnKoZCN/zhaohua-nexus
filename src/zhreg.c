@@ -51,6 +51,13 @@ static uint64_t now_ms(void) {
 // ---------------------------------------------------------------------------
 // 附加
 // ---------------------------------------------------------------------------
+// 布局自检：共享区文件必须容得下整个 zh_region。
+// 改动 ZHREG_MAX_SITE / ZHREG_MAX_CB / ZHREG_SITES_PER_POOL 后若这里报错，
+// 就同步调大 ZHREG_FILE_SIZE —— 否则 mmap 之后写 site[] 会越界，
+// 踩到后面的映射，表现为「注入后随机崩溃、无 tombstone」。
+_Static_assert(sizeof(zh_region) <= ZHREG_FILE_SIZE,
+               "ZHREG_FILE_SIZE 小于 sizeof(zh_region)：请调大共享区");
+
 zh_region* zhreg_attach(void) {
     if (g_region) return g_region;
 
@@ -70,10 +77,15 @@ zh_region* zhreg_attach(void) {
     uint64_t st22 = proc_starttime();
     int32_t  pid  = (int32_t)getpid();
 
-    // 进程重启（或首次）→ 整块重置，旧地址全部失效
-    if (r->magic != ZHREG_MAGIC || r->pid != pid || r->procStartTime != st22) {
+    // 进程重启（或首次）→ 整块重置，旧地址全部失效。
+    // 布局版本不符也整块重置：不同版本的探针结构体大小/偏移不同，
+    // 混着用必然把别人的数据按错的偏移读出来（池 base 被当成 size 之类）。
+    uint32_t magicLayout = (uint32_t)((r->magic >> 32) & 0xFFu);
+    if (r->magic != ZHREG_MAGIC ||
+        magicLayout != ZHREG_LAYOUT ||
+        r->pid != pid || r->procStartTime != st22) {
         memset(r, 0, sizeof(zh_region));
-        r->magic         = ZHREG_MAGIC;
+        r->magic         = ZHREG_MAGIC | ((uint64_t)ZHREG_LAYOUT << 32);
         r->pid           = pid;
         r->procStartTime = st22;
         r->wdOwner       = 0;
@@ -440,6 +452,19 @@ void zhreg_del_cb(zh_region* r, int siteIdx, int32_t owner) {
     zhreg_unlock(r);
 }
 
+// 某个探针在某个站点里占用的回调槽数
+int zhreg_owner_cb_count(zh_region* r, int siteIdx, int32_t owner) {
+    if (!r || siteIdx < 0 || siteIdx >= r->nSite) return 0;
+    zh_site_rec* s = &r->site[siteIdx];
+    int nCb = __atomic_load_n(&s->nCb, __ATOMIC_ACQUIRE);
+    if (nCb > ZHREG_MAX_CB) nCb = ZHREG_MAX_CB;
+    int n = 0;
+    for (int i = 0; i < nCb; ++i)
+        if (__atomic_load_n(&s->cb[i].alive, __ATOMIC_ACQUIRE) &&
+            __atomic_load_n(&s->cb[i].owner, __ATOMIC_RELAXED) == owner) ++n;
+    return n;
+}
+
 // 属于别人的活回调数量：为 0 时 handler 走纯本地快路径，不碰共享区
 int zhreg_foreign_cb(zh_region* r, int siteIdx, int32_t myId) {
     if (!r || siteIdx < 0 || siteIdx >= r->nSite) return 0;
@@ -457,16 +482,43 @@ int zhreg_foreign_cb(zh_region* r, int siteIdx, int32_t myId) {
     return n;
 }
 
+// 摘掉一个站点记录。
+//
+// ★ 原本这里只要 owner 匹配就把整条记录置 alive=0，但多探针场景下
+//   这是错的：站点记录归「第一个安装者」，后加入的探针只是往它的
+//   回调槽上挂。建立者自己卸载时若直接删记录，别的探针的回调就
+//   连同记录一起消失 —— 而且它们的本地 ii_site 还在，下次命中
+//   ii_dispatch 查不到共享站点，foreign 分支静默跳过，表现为
+//   「别的库的 hook 莫名失效」。
+//
+//   正确做法：先清掉自己的回调槽；只有当站点上再也没有任何活回调、
+//   且没有别的探针还在用它时才删除记录。
 void zhreg_del_site(zh_region* r, unsigned long addr, int owner) {
     if (!r) return;
     zhreg_lock(r);
-    // 同时匹配 alive：同一地址可能残留已死的旧记录，
-    // 只按 addr 会命中旧记录、把真正活着的那条留在表里。
-    for (int i = 0; i < r->nSite; ++i)
-        if (r->site[i].addr == addr && r->site[i].alive &&
-            (owner <= 0 || r->site[i].owner == owner)) {
-            r->site[i].alive = 0;
-            break;
+    for (int i = 0; i < r->nSite; ++i) {
+        zh_site_rec* s = &r->site[i];
+        if (!(s->addr == addr && s->alive)) continue;
+        if (owner > 0 && s->owner != owner) continue;
+
+        // 先摘自己的回调槽
+        if (owner > 0) {
+            for (int k = 0; k < ZHREG_MAX_CB; ++k)
+                if (s->cb[k].alive && s->cb[k].owner == owner)
+                    __atomic_store_n(&s->cb[k].alive, 0, __ATOMIC_RELEASE);
+            while (s->nCb > 0 &&
+                   !__atomic_load_n(&s->cb[s->nCb-1].alive, __ATOMIC_ACQUIRE)) --s->nCb;
         }
+
+        // 还有别人活着 → 记录留给他们用，不能删
+        int others = 0;
+        for (int k = 0; k < ZHREG_MAX_CB; ++k)
+            if (__atomic_load_n(&s->cb[k].alive, __ATOMIC_ACQUIRE) && s->cb[k].owner != owner)
+                { others = 1; break; }
+        if (others) break;
+
+        __atomic_store_n(&s->alive, 0, __ATOMIC_RELEASE);
+        break;
+    }
     zhreg_unlock(r);
 }
