@@ -137,21 +137,8 @@ static void run(void) {
 
 ## 📄 许可
 
-**[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)** +
-附加条款，不是 MIT。
+[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) + 附加条款。
 
-| 允许 | 禁止 |
-|---|---|
-| ✅ 使用、修改、分发 | ❌ **商业使用**（NonCommercial） |
-| ✅ 个人学习 / 安全研究 / 单机娱乐 | ❌ **闭源分发**（ShareAlike） |
-| ✅ 开源项目中引用 | ❌ **移除署名**（Attribution） |
-| | ❌ **开发游戏外挂**（附加条款 2） |
+署名、非商业、相同方式共享；不得用于联网多人作弊或分发商业外挂。
 
-**署名格式**：
-
-```
-本项目基于 ZhaoHua Nexus 开发
-https://github.com/PnKoZCN/zhaohua-nexus
-```
-
-完整条款见仓库 `LICENSE` 与 `README` 的「附加条款」一节。
+条款见仓库 `LICENSE` 与 `README`。
