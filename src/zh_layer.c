@@ -525,6 +525,43 @@ int zh_make_cancelable(const char* funcName) {
 // ---------------------------------------------------------------------------
 // 运行期管理
 // ---------------------------------------------------------------------------
+int zh_hook_owned(const char* funcName, ii_callback cb, void* user,
+                  const char* owner) {
+    if (!funcName || !cb || !owner) {
+        set_err(ZH_E_ARG, funcName, 0, "参数为空");
+        return ZH_E_ARG;
+    }
+
+    unsigned long addr = zh_find(funcName);
+    if (!addr) {
+        set_err(ZH_E_ARG, funcName, 0, "函数不在数据表");
+        return ZH_E_ARG;
+    }
+
+    // 站点已存在就追加节点，否则先建站点
+    int rc = 0;
+    if (!ii_find(addr)) {
+        rc = ii_install(addr, cb, user);
+        if (rc == 0) {
+            // 新站点：把刚插入的那个节点标记归属
+            ii_site* s = ii_find(addr);
+            if (s) {
+                for (ii_cb_node* n = s->cbs; n; n = n->next)
+                    if (n->cb == cb && n->user == user) { n->ownerName = owner; break; }
+            }
+        }
+    } else {
+        rc = ii_add_callback_owned(addr, cb, user, II_PRIO_DEFAULT, owner);
+    }
+
+    if (rc == 0) {
+        LOG_I(LOG_HOOK, "%s 挂载回调，归属 \"%s\"", funcName, owner);
+    } else {
+        set_err(rc, funcName, addr, ii_strerror(rc));
+    }
+    return rc;
+}
+
 int zh_set_owner(const char* funcName, const char* owner) {
     unsigned long a = zh_find(funcName);
     if (!a) { set_err(ZH_E_ARG, funcName, 0, "函数不在数据表"); return ZH_E_ARG; }
