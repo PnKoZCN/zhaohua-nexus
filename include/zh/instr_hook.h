@@ -147,8 +147,17 @@ typedef struct ii_cb_node {
     void*              user;
     int                priority;
     int                alive;      // 0 = 已释放（懒删除，遍历时跳过）
-    int                owner;      // 归属实例 id（0 = 全局引擎）
+    int                owner;      // 归属引擎实例 id（0 = 全局引擎）
     int                slowWarned; // 已经告警过"回调太慢"（只报一次）
+    // 归属 Mod 的名字（zh_hook_owned 传入）。
+    //
+    // 为什么归属要记在每个回调节点上、而不是站点上：
+    //   多个 Mod 动态链接同一个 libzh_engine.so 时，它们共用一份引擎和
+    //   一张站点表。如果归属记在站点上，后装的 Mod 会把前一个的名字覆盖掉，
+    //   前一个卸载时按名字匹配不到任何东西，静默返回 0 —— 回调继续跑，
+    //   调用方却以为卸载成功了（真机实测就是这个现象）。
+    //   记在节点上，各 Mod 只摘自己那几个节点，互不影响。
+    const char*        ownerName;
 } ii_cb_node;
 
 typedef struct {
@@ -226,6 +235,10 @@ int ii_install(unsigned long addr, ii_callback cb, void* user);
 // 返回 0 = 成功；-2 = 站点不存在（用 ii_install 先建）
 int ii_add_callback(unsigned long addr, ii_callback cb, void* user, int priority);
 
+// 同上，但给节点打上 Mod 归属名（ownerName 必须是长生命周期字符串，通常用字面量）
+int ii_add_callback_owned(unsigned long addr, ii_callback cb, void* user,
+                           int priority, const char* ownerName);
+
 // 从站点移除指定回调（按 cb+user 匹配）。返回 0 = 成功，-1 = 没找到
 int ii_remove_callback(unsigned long addr, ii_callback cb, void* user);
 
@@ -250,6 +263,10 @@ void ii_uninstall_all(void);
 
 // 查询
 int ii_count(void);
+
+// 诊断：dispatch 被调用次数 / 站点查找失败次数
+unsigned long ii_dispatch_count(void);
+unsigned long ii_dispatch_miss(void);
 ii_site* ii_find(unsigned long addr);
 
 // 判断某条指令能否插桩（是否支持重定位）
