@@ -61,3 +61,9 @@ add_executable(test_dispatch test_dispatch.c)
 target_link_libraries(test_dispatch PRIVATE zh_engine)
 target_include_directories(test_dispatch PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_test(NAME dispatch COMMAND test_dispatch)
+
+# 共享区布局与跨探针容量自检
+add_executable(test_layout test_layout.c)
+target_link_libraries(test_layout PRIVATE zh_engine)
+target_include_directories(test_layout PRIVATE ${CMAKE_SOURCE_DIR}/include)
+add_test(NAME layout COMMAND test_layout)
