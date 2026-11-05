@@ -108,3 +108,36 @@ target_include_directories(t00b_nowd PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_library(t08d_async SHARED t08d_async.c)
 target_link_libraries(t08d_async PRIVATE zh_engine)
 target_include_directories(t08d_async PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
+# 多库共存测试（两个探针同时注入，共享同一站点）
+add_library(mla SHARED mla.c)
+target_link_libraries(mla PRIVATE zh_engine)
+target_include_directories(mla PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
+add_library(mlb SHARED mlb.c)
+target_link_libraries(mlb PRIVATE zh_engine)
+target_include_directories(mlb PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
+# 诊断探针：直读共享区 + tick 候选对比
+add_library(mld SHARED mld.c)
+target_link_libraries(mld PRIVATE zh_engine)
+target_include_directories(mld PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
+# 独立诊断探针：把整份引擎静态打包进来，不依赖 libzh_engine.so。
+# 用途：在共享引擎已被旧版本加载的情况下，验证引擎自身是否还工作。
+if(TARGET zh_engine_static)
+    add_library(mldiag SHARED mldiag.c)
+    add_dependencies(mldiag zh_engine_static)
+    target_include_directories(mldiag PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    # 必须把整个静态库都拉进来：引擎内部大量符号靠 shell 里的地址引用，
+    # 没被显式调用的（汇编 handler 等）会被链接器当死代码丢掉。
+    target_link_options(mldiag PRIVATE
+        "LINKER:--whole-archive"
+        "SHELL:$<TARGET_FILE:zh_engine_static>"
+        "LINKER:--no-whole-archive")
+endif()
+
+# 收尾验证：最后一个归属者卸载后入口是否还原
+add_library(mlc SHARED mlc.c)
+target_link_libraries(mlc PRIVATE zh_engine)
+target_include_directories(mlc PRIVATE ${CMAKE_SOURCE_DIR}/include)
