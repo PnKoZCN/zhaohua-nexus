@@ -1,6 +1,7 @@
 { global:
     /* ii_* — 100 个 */
     ii_add_callback;
+    ii_add_callback_owned;
     ii_apply_pending;
     ii_arg_type;
     ii_call_site_addr;
@@ -16,6 +17,8 @@
     ii_count;
     ii_default;
     ii_dispatch;
+    ii_dispatch_miss;
+    ii_dispatch_count;
     ii_dispatch_light;
     ii_dump_ctx;
     ii_dump_ctx_range;
@@ -146,6 +149,7 @@
     zh_get_target;
     zh_guard_caught;
     zh_hook;
+    zh_hook_owned;
     zh_hook_call;
     zh_hook_guarded;
     zh_hook_light;
